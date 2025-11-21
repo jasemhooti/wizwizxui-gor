@@ -297,6 +297,7 @@ function getMainKeys(){
         }
     }
     array_push($mainKeys,$temp);
+    array_push($mainKeys,[['text'=>"🎲 قرعه کشی",'callback_data'=>"lotteryMenu"]]);
     if($from_id == $admin || $userInfo['isAdmin'] == true) array_push($mainKeys,[['text'=>"مدیریت ربات ⚙️",'callback_data'=>"managePanel"]]);
     return json_encode(['inline_keyboard'=>$mainKeys]); 
 }
@@ -340,6 +341,7 @@ function getAdminKeys(){
             ['text'=>$buttonValues['agent_list'],'callback_data'=>"agentsList"],
             ['text'=>'درخواست های رد شده','callback_data'=>"rejectedAgentList"]
             ],
+        [['text'=>"🎲 مدیریت قرعه کشی",'callback_data'=>"adminLotteryMenu"]],
         [['text'=>$buttonValues['back_to_main'],'callback_data'=>"mainMenu"]],
     ]]);
     
@@ -6217,6 +6219,91 @@ sendMessage(curl_error($curl));
     $response = curl_exec($curl);
     curl_close($curl);
     return json_decode($response);
+}
+
+function getLotteryMenuKeys(){
+    return json_encode(['inline_keyboard'=>[
+        [['text'=>"🎫 دریافت کد قرعه کشی",'callback_data'=>"buyLotteryCode"]],
+        [['text'=>"📋 مشاهده کدها",'callback_data'=>"viewMyLotteryCodes"]],
+        [['text'=>"📊 وضعیت قرعه کشی",'callback_data'=>"lotteryStatus"]],
+        [['text'=>"🔙 بازگشت به منوی اصلی",'callback_data'=>"mainMenu"]],
+    ]]);
+}
+
+function getAdminLotteryMenuKeys(){
+    return json_encode(['inline_keyboard'=>[
+        [['text'=>"💰 تعیین مبلغ قرعه کشی",'callback_data'=>"setLotteryPrice"]],
+        [['text'=>"📋 مشاهده کدهای خریداری شده",'callback_data'=>"viewAllLotteryCodes"]],
+        [['text'=>"⏰ تعیین زمان قرعه کشی",'callback_data'=>"setLotteryTime"]],
+        [['text'=>"🔙 بازگشت",'callback_data'=>"managePanel"]],
+    ]]);
+}
+
+function getLotterySettings(){
+    global $connection;
+    $stmt = $connection->prepare("SELECT * FROM `lottery_settings` WHERE `id` = 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $stmt->close();
+    if($result->num_rows > 0){
+        return $result->fetch_assoc();
+    }else{
+        $stmt = $connection->prepare("INSERT INTO `lottery_settings` (`id`, `price`, `draw_time`, `is_drawn`) VALUES (1, 0, NULL, 0)");
+        $stmt->execute();
+        $stmt->close();
+        return ['price' => 0, 'draw_time' => NULL, 'is_drawn' => 0];
+    }
+}
+
+function generateLotteryCode(){
+    return RandomString(8, "all") . "-" . RandomString(4, "all");
+}
+
+function checkAndRunLottery(){
+    global $connection, $admin;
+    $settings = getLotterySettings();
+    
+    if($settings['is_drawn'] == 1 || $settings['draw_time'] == NULL){
+        return false;
+    }
+    
+    if(time() >= $settings['draw_time']){
+        $stmt = $connection->prepare("SELECT * FROM `lottery_codes` ORDER BY RAND() LIMIT 1");
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $stmt->close();
+        
+        if($result->num_rows > 0){
+            $winner = $result->fetch_assoc();
+            
+            $stmt = $connection->prepare("INSERT INTO `lottery_winners` (`user_id`, `code`, `draw_date`) VALUES (?, ?, ?)");
+            $drawTime = time();
+            $stmt->bind_param("isi", $winner['user_id'], $winner['code'], $drawTime);
+            $stmt->execute();
+            $stmt->close();
+            
+            $stmt = $connection->prepare("UPDATE `lottery_settings` SET `is_drawn` = 1 WHERE `id` = 1");
+            $stmt->execute();
+            $stmt->close();
+            
+            $stmt = $connection->prepare("SELECT * FROM `users` WHERE `userid` = ?");
+            $stmt->bind_param("i", $winner['user_id']);
+            $stmt->execute();
+            $userResult = $stmt->get_result();
+            $stmt->close();
+            
+            if($userResult->num_rows > 0){
+                $userInfo = $userResult->fetch_assoc();
+                sendMessage("🎉 تبریک! شما برنده قرعه کشی شدید!\n\nکد برنده: " . $winner['code'], null, "HTML", $winner['user_id']);
+            }
+            
+            sendMessage("🎲 قرعه کشی انجام شد!\n\nبرنده:\nآیدی: " . $winner['user_id'] . "\nکد: " . $winner['code'], null, "HTML", $admin);
+            
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 ?>
