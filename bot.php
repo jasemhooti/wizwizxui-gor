@@ -10248,4 +10248,225 @@ if ($text == $buttonValues['cancel']) {
     sendMessage($mainValues['waiting_message'], $removeKeyboard);
     sendMessage($mainValues['reached_main_menu'],getMainKeys());
 }
+
+// قرعه کشی - بررسی و انجام خودکار
+checkAndRunLottery();
+
+// منوی قرعه کشی کاربر
+if($data == "lotteryMenu"){
+    editText($message_id, "🎲 منوی قرعه کشی\n\nاز گزینه‌های زیر انتخاب کنید:", getLotteryMenuKeys());
+}
+
+// دریافت کد قرعه کشی
+if($data == "buyLotteryCode"){
+    $settings = getLotterySettings();
+    if($settings['price'] <= 0){
+        alert("❌ مبلغ قرعه کشی هنوز تعیین نشده است. لطفا بعدا تلاش کنید.");
+        exit();
+    }
+    
+    if($settings['is_drawn'] == 1){
+        alert("❌ قرعه کشی قبلا انجام شده است.");
+        exit();
+    }
+    
+    sendMessage("🪄 لطفا صبور باشید ...",$removeKeyboard);
+    $hash_id = RandomString();
+    $stmt = $connection->prepare("DELETE FROM `pays` WHERE `user_id` = ? AND `type` = 'LOTTERY_CODE' AND `state` = 'pending'");
+    $stmt->bind_param("i", $from_id);
+    $stmt->execute();
+    $stmt->close();
+    
+    $time = time();
+    $stmt = $connection->prepare("INSERT INTO `pays` (`hash_id`, `user_id`, `type`, `plan_id`, `volume`, `day`, `price`, `request_date`, `state`)
+                                VALUES (?, ?, 'LOTTERY_CODE', '0', '0', '0', ?, ?, 'pending')");
+    $stmt->bind_param("siii", $hash_id, $from_id, $settings['price'], $time);
+    $stmt->execute();
+    $stmt->close();
+    
+    $keyboard = array();
+    if($botState['cartToCartState'] == "on") $keyboard[] = [['text' => $buttonValues['cart_to_cart'],  'callback_data' => "payLotteryWithCartToCart" . $hash_id]];
+    if($botState['nowPaymentWallet'] == "on") $keyboard[] = [['text' => $buttonValues['now_payment_gateway'],  'url' => $botUrl . "pay/?nowpayment&hash_id=" . $hash_id]];
+    if($botState['zarinpal'] == "on") $keyboard[] = [['text' => $buttonValues['zarinpal_gateway'],  'url' => $botUrl . "pay/?zarinpal&hash_id=" . $hash_id]];
+    if($botState['nextpay'] == "on") $keyboard[] = [['text' => $buttonValues['nextpay_gateway'],  'url' => $botUrl . "pay/?nextpay&hash_id=" . $hash_id]];
+    if($botState['weSwapState'] == "on") $keyboard[] = [['text' => $buttonValues['weswap_gateway'],  'callback_data' => "payLotteryWithWeSwap" . $hash_id]];
+    if($botState['tronWallet'] == "on") $keyboard[] = [['text' => $buttonValues['tron_gateway'],  'callback_data' => "payLotteryWithTronWallet" . $hash_id]];
+    
+    $keyboard[] = [['text'=>$buttonValues['cancel'], 'callback_data'=> "mainMenu"]];
+    
+    $keys = json_encode(['inline_keyboard'=>$keyboard]);
+    editText($message_id, "💰 اطلاعات خرید کد قرعه کشی:\n\nمبلغ: " . number_format($settings['price']) . " تومان\n\nلطفا روش پرداخت را انتخاب کنید:", $keys);
+}
+
+// مشاهده کدهای کاربر
+if($data == "viewMyLotteryCodes"){
+    $stmt = $connection->prepare("SELECT * FROM `lottery_codes` WHERE `user_id` = ? ORDER BY `purchase_date` DESC");
+    $stmt->bind_param("i", $from_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $stmt->close();
+    
+    if($result->num_rows == 0){
+        alert("❌ شما هنوز کد قرعه کشی خریداری نکرده‌اید.");
+        exit();
+    }
+    
+    $codes = "";
+    $count = 1;
+    while($row = $result->fetch_assoc()){
+        $date = jdate("Y-m-d H:i:s", $row['purchase_date']);
+        $codes .= "$count. کد: <code>" . $row['code'] . "</code>\n📅 تاریخ: $date\n\n";
+        $count++;
+    }
+    
+    $keys = json_encode(['inline_keyboard'=>[[['text'=>"🔙 بازگشت",'callback_data'=>"lotteryMenu"]]]]);
+    editText($message_id, "📋 کدهای قرعه کشی شما:\n\n" . $codes, $keys, "HTML");
+}
+
+// وضعیت قرعه کشی
+if($data == "lotteryStatus"){
+    $settings = getLotterySettings();
+    
+    if($settings['is_drawn'] == 1){
+        $stmt = $connection->prepare("SELECT * FROM `lottery_winners` ORDER BY `draw_date` DESC LIMIT 1");
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $stmt->close();
+        
+        if($result->num_rows > 0){
+            $winner = $result->fetch_assoc();
+            $drawDate = jdate("Y-m-d H:i:s", $winner['draw_date']);
+            $msg = "🎉 قرعه کشی انجام شده است!\n\n🏆 برنده:\n👤 آیدی: " . $winner['user_id'] . "\n🎫 کد برنده: <code>" . $winner['code'] . "</code>\n📅 تاریخ قرعه کشی: $drawDate";
+        }else{
+            $msg = "❌ اطلاعات برنده در دسترس نیست.";
+        }
+    }else{
+        if($settings['draw_time'] == NULL){
+            $msg = "⏳ زمان قرعه کشی هنوز تعیین نشده است.";
+        }else{
+            $drawTime = jdate("Y-m-d H:i:s", $settings['draw_time']);
+            $msg = "⏰ زمان قرعه کشی:\n📅 $drawTime\n\nقرعه کشی در زمان تعیین شده به صورت خودکار انجام خواهد شد.";
+        }
+    }
+    
+    $keys = json_encode(['inline_keyboard'=>[[['text'=>"🔙 بازگشت",'callback_data'=>"lotteryMenu"]]]]);
+    editText($message_id, $msg, $keys, "HTML");
+}
+
+// منوی مدیریت قرعه کشی ادمین
+if($data == "adminLotteryMenu" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    $settings = getLotterySettings();
+    $msg = "🎲 مدیریت قرعه کشی\n\n";
+    $msg .= "💰 مبلغ فعلی: " . number_format($settings['price']) . " تومان\n";
+    if($settings['draw_time'] != NULL){
+        $drawTime = jdate("Y-m-d H:i:s", $settings['draw_time']);
+        $msg .= "⏰ زمان قرعه کشی: $drawTime\n";
+    }else{
+        $msg .= "⏰ زمان قرعه کشی: تعیین نشده\n";
+    }
+    $msg .= "📊 وضعیت: " . ($settings['is_drawn'] == 1 ? "انجام شده" : "در انتظار") . "\n";
+    
+    editText($message_id, $msg, getAdminLotteryMenuKeys());
+}
+
+// تعیین مبلغ قرعه کشی
+if($data == "setLotteryPrice" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    delMessage();
+    sendMessage("💰 لطفا مبلغ قرعه کشی را به تومان وارد کنید:", $cancelKey);
+    setUser("setLotteryPrice");
+}
+
+if($userInfo['step'] == "setLotteryPrice" && $text != $buttonValues['cancel'] && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    if(is_numeric($text) && $text > 0){
+        $stmt = $connection->prepare("UPDATE `lottery_settings` SET `price` = ? WHERE `id` = 1");
+        $stmt->bind_param("i", $text);
+        $stmt->execute();
+        $stmt->close();
+        
+        sendMessage("✅ مبلغ قرعه کشی با موفقیت به " . number_format($text) . " تومان تنظیم شد.", $removeKeyboard);
+        setUser();
+        sendMessage("🎲 مدیریت قرعه کشی", getAdminLotteryMenuKeys());
+    }else{
+        sendMessage("❌ لطفا یک عدد معتبر وارد کنید.");
+    }
+}
+
+// مشاهده کدهای خریداری شده توسط ادمین
+if($data == "viewAllLotteryCodes" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    $stmt = $connection->prepare("SELECT lc.*, u.name, u.username FROM `lottery_codes` lc LEFT JOIN `users` u ON lc.user_id = u.userid ORDER BY lc.purchase_date DESC");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $stmt->close();
+    
+    if($result->num_rows == 0){
+        alert("❌ هیچ کد قرعه کشی خریداری نشده است.");
+        exit();
+    }
+    
+    $codes = "📋 لیست کدهای خریداری شده:\n\n";
+    $count = 1;
+    while($row = $result->fetch_assoc()){
+        $date = jdate("Y-m-d H:i:s", $row['purchase_date']);
+        $name = !empty($row['name']) ? $row['name'] : "نامشخص";
+        $username = !empty($row['username']) ? "@" . $row['username'] : "ندارد";
+        $codes .= "$count. 👤 $name ($username)\n🆔 آیدی: " . $row['user_id'] . "\n🎫 کد: <code>" . $row['code'] . "</code>\n📅 تاریخ: $date\n\n";
+        $count++;
+        if($count > 50) break; // محدود کردن به 50 مورد
+    }
+    
+    $keys = json_encode(['inline_keyboard'=>[[['text'=>"🔙 بازگشت",'callback_data'=>"adminLotteryMenu"]]]]);
+    editText($message_id, $codes, $keys, "HTML");
+}
+
+// تعیین زمان قرعه کشی
+if($data == "setLotteryTime" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    delMessage();
+    sendMessage("⏰ لطفا زمان قرعه کشی را به فرمت زیر وارد کنید:\n\nمثال: 1403/12/25 14:30\n\n(سال/ماه/روز ساعت:دقیقه)\n\nیا می‌توانید تعداد ساعت‌های باقی‌مانده را وارد کنید (مثلا: 24 برای 24 ساعت دیگر)", $cancelKey);
+    setUser("setLotteryTime");
+}
+
+if($userInfo['step'] == "setLotteryTime" && $text != $buttonValues['cancel'] && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    $drawTime = null;
+    
+    // اگر عدد ساده بود (تعداد ساعت)
+    if(is_numeric($text) && $text > 0){
+        $drawTime = time() + ($text * 3600);
+    }
+    // اگر فرمت تاریخ شمسی بود
+    elseif(preg_match('/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{1,2})/', $text, $matches)){
+        $year = (int)$matches[1];
+        $month = (int)$matches[2];
+        $day = (int)$matches[3];
+        $hour = (int)$matches[4];
+        $minute = (int)$matches[5];
+        
+        // تبدیل تقریبی تاریخ شمسی به میلادی (تقریبی)
+        // سال شمسی - 621 = سال میلادی تقریبی
+        $miladiYear = $year - 621;
+        // استفاده از mktime برای ساخت timestamp
+        $drawTime = mktime($hour, $minute, 0, $month, $day, $miladiYear);
+        
+        // اگر تاریخ در گذشته بود، یک سال اضافه می‌کنیم (برای تطبیق بهتر)
+        if($drawTime < time()){
+            $drawTime = mktime($hour, $minute, 0, $month, $day, $miladiYear + 1);
+        }
+    }
+    
+    if($drawTime && $drawTime > time()){
+        $stmt = $connection->prepare("UPDATE `lottery_settings` SET `draw_time` = ?, `is_drawn` = 0 WHERE `id` = 1");
+        $stmt->bind_param("i", $drawTime);
+        $stmt->execute();
+        $stmt->close();
+        
+        $drawTimeFormatted = jdate("Y-m-d H:i:s", $drawTime);
+        sendMessage("✅ زمان قرعه کشی با موفقیت به $drawTimeFormatted تنظیم شد.\n\nقرعه کشی در زمان تعیین شده به صورت خودکار انجام خواهد شد.", $removeKeyboard);
+        setUser();
+        sendMessage("🎲 مدیریت قرعه کشی", getAdminLotteryMenuKeys());
+    }else{
+        sendMessage("❌ زمان وارد شده صحیح نیست یا در گذشته است. لطفا دوباره تلاش کنید.\n\nمثال: 1403/12/25 14:30 یا 24 (برای 24 ساعت دیگر)");
+    }
+}
+
+// پرداخت موفق کد قرعه کشی - بررسی در pay/back.php
+// این بخش باید در فایل pay/back.php اضافه شود
 ?>
