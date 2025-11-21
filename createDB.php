@@ -305,6 +305,33 @@ $connection->query("CREATE TABLE  `send_list` (
         PRIMARY KEY (`id`)
         )");
 
+$connection->query("CREATE TABLE `lottery_settings` (
+  `id` int(255) NOT NULL AUTO_INCREMENT,
+  `price` int(255) NOT NULL DEFAULT 0,
+  `draw_time` int(255) DEFAULT NULL,
+  `is_drawn` tinyint(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
 
+$connection->query("CREATE TABLE `lottery_codes` (
+  `id` int(255) NOT NULL AUTO_INCREMENT,
+  `user_id` bigint(10) NOT NULL,
+  `code` varchar(50) NOT NULL,
+  `purchase_date` int(255) NOT NULL,
+  `pay_hash_id` varchar(1000) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`),
+  KEY `code` (`code`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
+$connection->query("CREATE TABLE `lottery_winners` (
+  `id` int(255) NOT NULL AUTO_INCREMENT,
+  `user_id` bigint(10) NOT NULL,
+  `code` varchar(50) NOT NULL,
+  `draw_date` int(255) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
+$connection->query("INSERT INTO `lottery_settings` (`id`, `price`, `draw_time`, `is_drawn`) VALUES (1, 0, NULL, 0)");
 
 ?>
