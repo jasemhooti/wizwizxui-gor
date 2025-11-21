@@ -193,6 +193,7 @@ $agentBought = $payParam['agent_bought'];
 if($payType == "BUY_SUB") $payDescription = "خرید اشتراک";
 elseif($payType == "RENEW_ACCOUNT") $payDescription = "تمدید اکانت";
 elseif($payType == "INCREASE_WALLET") $payDescription ="شارژ کیف پول";
+elseif($payType == "LOTTERY_CODE") $payDescription = "خرید کد قرعه کشی";
 elseif(preg_match('/^INCREASE_DAY_(\d+)_(\d+)/',$payType)) $payDescription = "افزایش زمان اکانت";
 elseif(preg_match('/^INCREASE_VOLUME_(\d+)_(\d+)/',$payType)) $payDescription = "افزایش حجم اکانت";    
 
@@ -520,6 +521,19 @@ elseif($payType == "INCREASE_WALLET"){
     showForm("پرداخت شما با موفقیت انجام شد، مبلغ ". number_format($amount) . " تومان به کیف پول شما اضافه شد",$payDescription, true);
     sendMessage("✅ مبلغ " . number_format($amount). " تومان به حساب شما اضافه شد",null,null,$user_id);
     sendMessage("✅ مبلغ " . number_format($amount) . " تومان به کیف پول کاربر $user_id توسط درگاه اضافه شد",null,null,$admin);                
+}
+elseif($payType == "LOTTERY_CODE"){
+    $lotteryCode = generateLotteryCode();
+    $purchaseDate = time();
+    
+    $stmt = $connection->prepare("INSERT INTO `lottery_codes` (`user_id`, `code`, `purchase_date`, `pay_hash_id`) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("isis", $user_id, $lotteryCode, $purchaseDate, $payParam['hash_id']);
+    $stmt->execute();
+    $stmt->close();
+    
+    showForm("🎉 پرداخت شما با موفقیت انجام شد!\n\n🎫 کد قرعه کشی شما:\n<code>$lotteryCode</code>\n\nاین کد در قرعه کشی شرکت خواهد کرد.", $payDescription, true);
+    sendMessage("🎉 کد قرعه کشی شما با موفقیت دریافت شد!\n\n🎫 کد شما: <code>$lotteryCode</code>\n\nاین کد در قرعه کشی شرکت خواهد کرد. می‌توانید از منوی قرعه کشی کدهای خود را مشاهده کنید.", json_encode(['inline_keyboard'=>[[['text'=>"🎲 منوی قرعه کشی",'callback_data'=>"lotteryMenu"],['text'=>"🏘 صفحه اصلی",'callback_data'=>"mainMenu"]]]]), "HTML", $user_id);
+    sendMessage("✅ کاربر $user_id کد قرعه کشی خریداری کرد\n\n🎫 کد: <code>$lotteryCode</code>", null, "HTML", $admin);
 }
 elseif($payType == "RENEW_ACCOUNT"){
     $oid = $plan_id;
