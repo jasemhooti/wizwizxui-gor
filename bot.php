@@ -181,6 +181,92 @@ if($userInfo['step'] == "addNewAdmin" && $from_id === $admin && $text != $button
         sendMessage($mainValues['send_only_number']);
     }
 }
+if($data=="lotteryAdmin" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    $round = getActiveLotteryRound();
+    $textMsg = getLotteryOverviewText('admin', $round);
+    editText($message_id, $textMsg, getLotteryAdminKeys());
+}
+if($data=="lotterySetAmount" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    delMessage();
+    sendMessage($mainValues['lottery_enter_amount'], $cancelKey);
+    setUser("lotterySetAmount");
+}
+if($userInfo['step'] == "lotterySetAmount" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    if($text == $buttonValues['cancel']){
+        sendMessage($mainValues['reached_main_menu'], getAdminKeys());
+        setUser();
+    }elseif(!is_numeric($text) || intval($text) <= 0){
+        sendMessage($mainValues['lottery_invalid_amount']);
+    }else{
+        $amount = intval($text);
+        setLotteryAmount($amount);
+        sendMessage($mainValues['lottery_amount_saved'],$removeKeyboard);
+        setUser();
+        $round = getActiveLotteryRound();
+        sendMessage(getLotteryOverviewText('admin', $round), getLotteryAdminKeys());
+    }
+}
+if($data=="lotterySetTime" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    delMessage();
+    sendMessage($mainValues['lottery_enter_time'], $cancelKey);
+    setUser("lotterySetTime");
+}
+if($userInfo['step'] == "lotterySetTime" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    if($text == $buttonValues['cancel']){
+        sendMessage($mainValues['reached_main_menu'], getAdminKeys());
+        setUser();
+    }else{
+        $tz = new DateTimeZone('Asia/Tehran');
+        $lotteryDate = DateTime::createFromFormat('Y-m-d H:i', $text, $tz);
+        if(!$lotteryDate){
+            sendMessage($mainValues['lottery_time_format_error']);
+        }else{
+            $timestamp = $lotteryDate->getTimestamp();
+            if($timestamp <= time()){
+                sendMessage($mainValues['lottery_time_in_past']);
+            }else{
+                setLotteryDrawTime($timestamp);
+                sendMessage($mainValues['lottery_time_saved'],$removeKeyboard);
+                setUser();
+                $round = getActiveLotteryRound();
+                sendMessage(getLotteryOverviewText('admin', $round), getLotteryAdminKeys());
+            }
+        }
+    }
+}
+if($data=="lotteryViewCodes" && ($from_id == $admin || $userInfo['isAdmin'] == true)){
+    $round = getActiveLotteryRound();
+    if(!$round){
+        editText($message_id, $mainValues['lottery_no_round_defined'], getLotteryAdminKeys());
+    }else{
+        $count = getLotteryCodesCount($round['id']);
+        $textMsg = str_replace("COUNT", number_format($count), $mainValues['lottery_codes_admin_count']) . "\n";
+        $stmt = $connection->prepare("SELECT lc.code, lc.userid, lc.created_at, u.username, u.name FROM `lottery_codes` lc LEFT JOIN `users` u ON lc.userid = u.userid WHERE lc.round_id = ? ORDER BY lc.id DESC LIMIT 20");
+        $stmt->bind_param("i", $round['id']);
+        $stmt->execute();
+        $codes = $stmt->get_result();
+        if($codes->num_rows > 0){
+            $textMsg .= $mainValues['lottery_codes_admin_header'] . "\n";
+            while($row = $codes->fetch_assoc()){
+                $userLabel = !empty($row['username']) && $row['username'] != " ندارد " ? "@" . $row['username'] : $row['name'];
+                $date = jdate("Y-m-d H:i", $row['created_at']);
+                $line = str_replace(
+                    ["CODE","USER","DATE"],
+                    [$row['code'], $userLabel, $date],
+                    $mainValues['lottery_codes_admin_item']
+                );
+                $textMsg .= $line . "\n";
+            }
+            if($count > $codes->num_rows){
+                $textMsg .= $mainValues['lottery_codes_admin_more'];
+            }
+        }else{
+            $textMsg .= $mainValues['lottery_codes_admin_empty'];
+        }
+        $stmt->close();
+        editText($message_id, trim($textMsg), getLotteryAdminKeys());
+    }
+}
 if(($data=="botSettings" or preg_match("/^changeBot(\w+)/",$data,$match)) && ($from_id == $admin || $userInfo['isAdmin'] == true)){
     if($data!="botSettings"){
         if($match[1] == "cartToCartAutoAcceptType") $newValue = $botState[$match[1]] == "0"?"1":($botState[$match[1]] == "1"?"2":0);
@@ -261,6 +347,63 @@ if(preg_match('/^changePaymentKeys(\w+)/',$userInfo['step'],$match) && $text != 
     sendMessage($mainValues['saved_successfuly'],$removeKeyboard);
     sendMessage($mainValues['change_bot_settings_message'],getGateWaysKeys());
     setUser();
+}
+if($data=="lotteryMain"){
+    $round = getActiveLotteryRound();
+    $textMsg = getLotteryOverviewText('user', $round, $from_id);
+    sendMessage($textMsg, getLotteryUserKeys());
+}
+if($data=="lotteryBuyCode"){
+    $round = getActiveLotteryRound();
+    if(!$round || intval($round['amount']) <= 0 || empty($round['draw_time']) || $round['draw_time'] <= time()){
+        alert($mainValues['lottery_not_ready'], true);
+    }elseif($userInfo['wallet'] < intval($round['amount'])){
+        alert($mainValues['lottery_purchase_not_enough_wallet'], true);
+    }else{
+        $price = intval($round['amount']);
+        $code = generateLotteryCode($round['id']);
+        $createdAt = time();
+        $stmt = $connection->prepare("INSERT INTO `lottery_codes` (`round_id`,`userid`,`code`,`price`,`created_at`) VALUES (?,?,?,?,?)");
+        $stmt->bind_param("iisii", $round['id'], $from_id, $code, $price, $createdAt);
+        $stmt->execute();
+        $stmt->close();
+        
+        $stmt = $connection->prepare("UPDATE `users` SET `wallet` = `wallet` - ? WHERE `userid` = ?");
+        $stmt->bind_param("ii", $price, $from_id);
+        $stmt->execute();
+        $stmt->close();
+        $userInfo['wallet'] -= $price;
+        
+        $msg = str_replace(
+            ['LOTTERY_CODE','LOTTERY_PRICE'],
+            [$code, number_format($price)],
+            $mainValues['lottery_purchase_success']
+        );
+        sendMessage($msg, getLotteryUserKeys());
+    }
+}
+if($data=="lotteryMyCodes"){
+    $round = getActiveLotteryRound();
+    if(!$round){
+        sendMessage($mainValues['lottery_no_round_defined'], getLotteryUserKeys());
+    }else{
+        $stmt = $connection->prepare("SELECT `code`, `created_at` FROM `lottery_codes` WHERE `round_id` = ? AND `userid` = ? ORDER BY `id` DESC LIMIT 50");
+        $stmt->bind_param("ii", $round['id'], $from_id);
+        $stmt->execute();
+        $codes = $stmt->get_result();
+        if($codes->num_rows == 0){
+            $stmt->close();
+            sendMessage($mainValues['lottery_user_codes_empty'], getLotteryUserKeys());
+        }else{
+            $lines = [];
+            while($row = $codes->fetch_assoc()){
+                $lines[] = "• {$row['code']} - " . jdate("Y-m-d H:i", $row['created_at']);
+            }
+            $stmt->close();
+            $textMsg = str_replace("CODES", implode("\n", $lines), $mainValues['lottery_user_codes_header']);
+            sendMessage($textMsg, getLotteryUserKeys());
+        }
+    }
 }
 if(($data == "agentsList" || preg_match('/^nextAgentList(\d+)/',$data,$match)) && ($from_id == $admin || $userInfo['isAdmin'] == true)){
     $keys = getAgentsList($match[1]??0);
