@@ -1,6 +1,11 @@
 #!/bin/bash
 
 # Written By: wizwiz
+SCRIPT_REPOSITORY="wizwizdev/wizwizxui-timebot-main"
+REPO_URL="https://github.com/${SCRIPT_REPOSITORY}.git"
+PANEL_RELEASE_VERSION="10.3.1"
+PANEL_RELEASE_URL="https://github.com/${SCRIPT_REPOSITORY}/releases/download/${PANEL_RELEASE_VERSION}/wizwizpanel.zip"
+RAW_BASE_URL="https://raw.githubusercontent.com/${SCRIPT_REPOSITORY}/main"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo -e "\033[33mPlease run as root\033[0m"
@@ -31,7 +36,7 @@ do
 			rm -r /var/www/html/wizwizxui-timebot/
 			echo -e "\n\e[92mWait a few seconds ...\033[0m\n"
 			sleep 3
-			git clone https://github.com/wizwizdev/wizwizxui-timebot.git /var/www/html/wizwizxui-timebot
+			git clone ${REPO_URL} /var/www/html/wizwizxui-timebot
 			sudo chown -R www-data:www-data /var/www/html/wizwizxui-timebot/
 			sudo chmod -R 755 /var/www/html/wizwizxui-timebot/
 			sleep 3
@@ -111,7 +116,7 @@ do
 			echo "Folder created successfully!"
 			
 			 cd /var/www/html/
-			 wget -O wizwizpanel.zip https://github.com/wizwizdev/wizwizxui-timebot/releases/download/10.3.1/wizwizpanel.zip
+			 wget -O wizwizpanel.zip ${PANEL_RELEASE_URL}
 			
 			 file_to_transfer="/var/www/html/wizwizpanel.zip"
 			 destination_dir=$(find /var/www/html -type d -name "*${RANDOM_CODE}*" -print -quit)
@@ -171,10 +176,10 @@ do
 
 			(crontab -l ; echo "0 * * * * ./dbbackupwizwiz.sh") | sort - | uniq - | crontab -
 			
-			wget https://raw.githubusercontent.com/wizwizdev/wizwizxui-timebot/main/dbbackupwizwiz.sh | chmod +x dbbackupwizwiz.sh
+			wget ${RAW_BASE_URL}/dbbackupwizwiz.sh | chmod +x dbbackupwizwiz.sh
 			./dbbackupwizwiz.sh
    
-			wget https://raw.githubusercontent.com/wizwizdev/wizwizxui-timebot/main/dbbackupwizwiz.sh | chmod +x dbbackupwizwiz.sh
+			wget ${RAW_BASE_URL}/dbbackupwizwiz.sh | chmod +x dbbackupwizwiz.sh
 			./dbbackupwizwiz.sh
 			
 			echo -e "\n\e[92m The backup settings have been successfully completed.\033[0m\n"
