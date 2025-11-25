@@ -9,6 +9,29 @@ if($connection->connect_error){
 }
 $connection->set_charset("utf8mb4");
 
+$connection->query("CREATE TABLE IF NOT EXISTS `lottery_rounds` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `amount` int(11) NOT NULL DEFAULT 0,
+    `draw_time` int(11) DEFAULT NULL,
+    `status` varchar(20) NOT NULL DEFAULT 'scheduled',
+    `winners` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
+$connection->query("CREATE TABLE IF NOT EXISTS `lottery_codes` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `round_id` int(11) NOT NULL,
+    `userid` bigint(20) NOT NULL,
+    `code` varchar(50) NOT NULL,
+    `price` int(11) NOT NULL,
+    `created_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `round_code` (`round_id`,`code`),
+    KEY `round_idx` (`round_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
 function bot($method, $datas = []){
     global $botToken;
     $url = "https://api.telegram.org/bot" . $botToken . "/" . $method;
@@ -205,6 +228,8 @@ if(!is_null($botState)) $botState = json_decode($botState,true);
 else $botState = array();
 $stmt->close();
 
+runLotteryDraws();
+
 $channelLock = $botState['lockChannel'];
 $joniedState= bot('getChatMember', ['chat_id' => $channelLock,'user_id' => $from_id])->result->status;
 
@@ -267,6 +292,7 @@ function getMainKeys(){
                 []
             ),
         [['text'=>$buttonValues['sharj'],'callback_data'=>"increaseMyWallet"]],
+        [['text'=>$buttonValues['lottery_main_button'],'callback_data'=>"lotteryMain"]],
         [['text'=>$buttonValues['invite_friends'],'callback_data'=>"inviteFriends"],['text'=>$buttonValues['my_info'],'callback_data'=>"myInfo"]],
         (($botState['sharedExistence'] == "on" && $botState['individualExistence'] == "on")?
         [['text'=>$buttonValues['shared_existence'],'callback_data'=>"availableServers"],['text'=>$buttonValues['individual_existence'],'callback_data'=>"availableServers2"]]:[]),
@@ -333,6 +359,7 @@ function getAdminKeys(){
         [['text'=>$buttonValues['categories_settings'],'callback_data'=>"categoriesSetting"]],
         [['text'=>$buttonValues['plan_settings'],'callback_data'=>"backplan"]],
         [['text'=>$buttonValues['discount_settings'],'callback_data'=>"discount_codes"],['text'=>$buttonValues['main_button_settings'],'callback_data'=>"mainMenuButtons"]],
+        [['text'=>$buttonValues['lottery_admin'],'callback_data'=>"lotteryAdmin"]],
         [['text'=>$buttonValues['gateways_settings'],'callback_data'=>"gateWays_Channels"],['text'=>$buttonValues['bot_settings'],'callback_data'=>'botSettings']],
         [['text'=>$buttonValues['tickets_list'],'callback_data'=>"ticketsList"],['text'=>$buttonValues['message_to_all'],'callback_data'=>"message2All"]],
         [['text'=>$buttonValues['forward_to_all'],'callback_data'=>"forwardToAll"]],
@@ -343,6 +370,24 @@ function getAdminKeys(){
         [['text'=>$buttonValues['back_to_main'],'callback_data'=>"mainMenu"]],
     ]]);
     
+}
+
+function getLotteryAdminKeys(){
+    global $buttonValues;
+    return json_encode(['inline_keyboard'=>[
+        [['text'=>$buttonValues['lottery_manage_amount'],'callback_data'=>"lotterySetAmount"]],
+        [['text'=>$buttonValues['lottery_manage_time'],'callback_data'=>"lotterySetTime"]],
+        [['text'=>$buttonValues['lottery_view_codes_admin'],'callback_data'=>"lotteryViewCodes"]],
+        [['text'=>$buttonValues['back_button'],'callback_data'=>"managePanel"]],
+    ]]);
+}
+function getLotteryUserKeys(){
+    global $buttonValues;
+    return json_encode(['inline_keyboard'=>[
+        [['text'=>$buttonValues['lottery_buy_code'],'callback_data'=>"lotteryBuyCode"]],
+        [['text'=>$buttonValues['lottery_view_codes_user'],'callback_data'=>"lotteryMyCodes"]],
+        [['text'=>$buttonValues['back_to_main'],'callback_data'=>"mainMenu"]],
+    ]]);
 }
 
 function setSettings($field, $value){
@@ -2097,6 +2142,163 @@ function setUser($value = 'none', $field = 'step'){
     
     $stmt->bind_param("si", $value, $from_id);
     $stmt->execute();
+    $stmt->close();
+}
+
+function getActiveLotteryRound(){
+    global $connection;
+    $stmt = $connection->prepare("SELECT * FROM `lottery_rounds` WHERE `status` = 'scheduled' ORDER BY `id` DESC LIMIT 1");
+    $stmt->execute();
+    $round = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $round;
+}
+function createLotteryRound($amount = 0, $drawTime = 0){
+    global $connection;
+    $status = 'scheduled';
+    $time = time();
+    $drawTime = $drawTime??0;
+    $stmt = $connection->prepare("INSERT INTO `lottery_rounds` (`amount`,`draw_time`,`status`,`created_at`,`updated_at`) VALUES (?,?,?,?,?)");
+    $stmt->bind_param("iissi", $amount, $drawTime, $status, $time, $time);
+    $stmt->execute();
+    $stmt->close();
+    return $connection->insert_id;
+}
+function ensureActiveLotteryRound(){
+    $round = getActiveLotteryRound();
+    if(!$round){
+        createLotteryRound();
+        $round = getActiveLotteryRound();
+    }
+    return $round;
+}
+function setLotteryAmount($amount){
+    global $connection;
+    $round = ensureActiveLotteryRound();
+    $time = time();
+    $stmt = $connection->prepare("UPDATE `lottery_rounds` SET `amount` = ?, `updated_at` = ? WHERE `id` = ?");
+    $stmt->bind_param("iii", $amount, $time, $round['id']);
+    $stmt->execute();
+    $stmt->close();
+}
+function setLotteryDrawTime($timestamp){
+    global $connection;
+    $round = ensureActiveLotteryRound();
+    $time = time();
+    $stmt = $connection->prepare("UPDATE `lottery_rounds` SET `draw_time` = ?, `updated_at` = ? WHERE `id` = ?");
+    $stmt->bind_param("iii", $timestamp, $time, $round['id']);
+    $stmt->execute();
+    $stmt->close();
+}
+function getLotteryCodesCount($roundId){
+    global $connection;
+    $stmt = $connection->prepare("SELECT COUNT(*) AS total FROM `lottery_codes` WHERE `round_id` = ?");
+    $stmt->bind_param("i", $roundId);
+    $stmt->execute();
+    $res = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return intval($res['total']??0);
+}
+function getLotteryUserCodesCount($roundId, $userId){
+    global $connection;
+    $stmt = $connection->prepare("SELECT COUNT(*) AS total FROM `lottery_codes` WHERE `round_id` = ? AND `userid` = ?");
+    $stmt->bind_param("ii", $roundId, $userId);
+    $stmt->execute();
+    $res = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return intval($res['total']??0);
+}
+function generateLotteryCode($roundId){
+    global $connection;
+    do{
+        $code = "NB" . rand(100000,999999);
+        $stmt = $connection->prepare("SELECT `id` FROM `lottery_codes` WHERE `round_id` = ? AND `code` = ?");
+        $stmt->bind_param("is", $roundId, $code);
+        $stmt->execute();
+        $exists = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+    }while($exists);
+    return $code;
+}
+function getLotteryTimeText($timestamp){
+    global $mainValues;
+    if(empty($timestamp)) return $mainValues['lottery_time_not_set'];
+    return jdate("Y-m-d H:i", $timestamp);
+}
+function getLotteryOverviewText($mode = 'admin', $round = null, $userId = null){
+    global $mainValues;
+    if(!$round){
+        return $mainValues['lottery_no_round_defined'];
+    }
+    $amount = number_format($round['amount']);
+    $timeText = getLotteryTimeText($round['draw_time']);
+    if($mode == 'user' && $userId != null){
+        $codes = getLotteryUserCodesCount($round['id'], $userId);
+        $template = $mainValues['lottery_user_overview'];
+        $search = ['LOTTERY_AMOUNT','LOTTERY_TIME','USER_CODES'];
+        $replace = [$amount,$timeText,$codes];
+    }else{
+        $codes = getLotteryCodesCount($round['id']);
+        $template = $mainValues['lottery_admin_overview'];
+        $search = ['LOTTERY_AMOUNT','LOTTERY_TIME','LOTTERY_CODES'];
+        $replace = [$amount,$timeText,$codes];
+    }
+    return str_replace($search, $replace, $template);
+}
+function runLotteryDraws(){
+    global $connection, $mainValues, $admin;
+    $now = time();
+    $stmt = $connection->prepare("SELECT * FROM `lottery_rounds` WHERE `status` = 'scheduled' AND `draw_time` > 0 AND `draw_time` <= ?");
+    $stmt->bind_param("i", $now);
+    $stmt->execute();
+    $rounds = $stmt->get_result();
+    while($round = $rounds->fetch_assoc()){
+        $codesStmt = $connection->prepare("SELECT `id`,`userid`,`code` FROM `lottery_codes` WHERE `round_id` = ?");
+        $codesStmt->bind_param("i", $round['id']);
+        $codesStmt->execute();
+        $codesRes = $codesStmt->get_result();
+        if($codesRes->num_rows == 0){
+            $codesStmt->close();
+            $updateStmt = $connection->prepare("UPDATE `lottery_rounds` SET `status` = 'completed', `updated_at` = ? WHERE `id` = ?");
+            $updateStmt->bind_param("ii", $now, $round['id']);
+            $updateStmt->execute();
+            $updateStmt->close();
+            if(!empty($admin)) sendMessage($mainValues['lottery_draw_insufficient_codes'], null, null, $admin);
+            continue;
+        }
+        $codes = [];
+        while($row = $codesRes->fetch_assoc()){
+            $codes[] = $row;
+        }
+        $codesStmt->close();
+        shuffle($codes);
+        $winnerCount = min(3, count($codes));
+        $winners = [];
+        for($i=0;$i<$winnerCount;$i++){
+            $rank = $i+1;
+            $winner = $codes[$i];
+            $winners[] = ['rank'=>$rank,'code'=>$winner['code'],'userid'=>$winner['userid']];
+            $msg = str_replace(
+                ['LOTTERY_CODE','RANK'],
+                [$winner['code'],$rank],
+                $mainValues['lottery_draw_winner_user']
+            );
+            sendMessage($msg, null, "HTML", $winner['userid']);
+        }
+        $rankingsText = "";
+        foreach($winners as $info){
+            $rankingsText .= "نفر {$info['rank']}: {$info['code']}\n";
+        }
+        $winnersJson = json_encode($winners, JSON_UNESCAPED_UNICODE);
+        $updateStmt = $connection->prepare("UPDATE `lottery_rounds` SET `status` = 'completed', `winners` = ?, `updated_at` = ? WHERE `id` = ?");
+        $updateStmt->bind_param("sii", $winnersJson, $now, $round['id']);
+        $updateStmt->execute();
+        $updateStmt->close();
+        if(!empty($admin) && !empty($rankingsText)){
+            $msg = str_replace("RANKINGS", trim($rankingsText), $mainValues['lottery_draw_winner_admin']);
+            sendMessage($msg, null, "HTML", $admin);
+        }
+    }
     $stmt->close();
 }
 function generateRandomString($length, $protocol) {
