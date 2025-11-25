@@ -222,6 +222,29 @@ $connection->query("CREATE TABLE `setting` (
   PRIMARY KEY (`id`)
 )");
 
+$connection->query("CREATE TABLE `lottery_rounds` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `amount` int(11) NOT NULL DEFAULT 0,
+  `draw_time` int(11) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'scheduled',
+  `winners` text DEFAULT NULL,
+  `created_at` int(11) NOT NULL,
+  `updated_at` int(11) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
+$connection->query("CREATE TABLE `lottery_codes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `round_id` int(11) NOT NULL,
+  `userid` bigint(20) NOT NULL,
+  `code` varchar(50) NOT NULL,
+  `price` int(11) NOT NULL,
+  `created_at` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `round_code` (`round_id`,`code`),
+  KEY `round_idx` (`round_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci");
+
 $connection->query("INSERT INTO `setting` (`id`, `type`, `value`) VALUES
 (1, 'TICKETS_CATEGORY', 'شکایت'),
 (2, 'INVITE_BANNER_AMOUNT', '3000'),
